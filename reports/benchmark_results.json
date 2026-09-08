@@ -1,0 +1,43 @@
+{
+  "metadata": {
+    "torch": "2.6.0+cu124",
+    "device": "cpu",
+    "batch_size": 1,
+    "seq_len": 64,
+    "steps": 3
+  },
+  "results": [
+    {
+      "name": "dense-full-baseline",
+      "total_parameters": 6065792,
+      "active_parameters": 6065792,
+      "latency_ms": 7.605366680460672,
+      "tokens_per_second": 8415.110367318068,
+      "peak_memory_mb": null
+    },
+    {
+      "name": "kda+dense",
+      "total_parameters": 6414032,
+      "active_parameters": 6414032,
+      "latency_ms": 44.39583331501732,
+      "tokens_per_second": 1441.5767251372074,
+      "peak_memory_mb": null
+    },
+    {
+      "name": "kda+attnres+dense",
+      "total_parameters": 6415592,
+      "active_parameters": 6415592,
+      "latency_ms": 47.584166672701635,
+      "tokens_per_second": 1344.9852014896353,
+      "peak_memory_mb": null
+    },
+    {
+      "name": "mini-k3",
+      "total_parameters": 11533544,
+      "active_parameters": 6225128,
+      "latency_ms": 58.96846666776886,
+      "tokens_per_second": 1085.325829490854,
+      "peak_memory_mb": null
+    }
+  ]
+}
