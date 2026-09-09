@@ -25,21 +25,30 @@ class ByteTokenizer:
 
 class JsonlTokenDataset(Dataset):
     def __init__(self, path, tokenizer, seq_len):
-        self.texts = []
-        with Path(path).open(encoding="utf-8") as handle:
-            for line in handle:
-                row = json.loads(line)
-                if row.get("text"):
-                    self.texts.append(str(row["text"]))
-        if not self.texts:
-            raise ValueError(f"no non-empty 'text' records in {path}")
+        self.path = str(Path(path).resolve())
+        self.offsets = []
+        with open(self.path, "rb") as handle:
+            while True:
+                offset = handle.tell()
+                line = handle.readline()
+                if not line:
+                    break
+                if line.strip():
+                    self.offsets.append(offset)
+        if not self.offsets:
+            raise ValueError(f"no records in {path}")
         self.tokenizer, self.seq_len = tokenizer, seq_len
+        self._handle = None
 
     def __len__(self):
-        return len(self.texts)
+        return len(self.offsets)
 
     def __getitem__(self, index):
-        tok = self.tokenizer(self.texts[index], add_special_tokens=False,
+        if self._handle is None:
+            self._handle = open(self.path, "rb")
+        self._handle.seek(self.offsets[index])
+        row = json.loads(self._handle.readline().decode("utf-8"))
+        tok = self.tokenizer(str(row["text"]), add_special_tokens=False,
                              truncation=True, max_length=self.seq_len - 2)["input_ids"]
         ids = [self.tokenizer.bos_token_id] + tok + [self.tokenizer.eos_token_id]
         ids += [self.tokenizer.pad_token_id] * (self.seq_len - len(ids))
@@ -72,6 +81,9 @@ def main():
     p.add_argument("--grad-clip", type=float, default=1.0)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--log-every", type=int, default=10)
+    p.add_argument("--save-every", type=int, default=1000)
+    p.add_argument("--max-steps", type=int, default=0, help="0 means a full epoch schedule")
+    p.add_argument("--num-workers", type=int, default=0)
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = p.parse_args()
 
@@ -87,12 +99,13 @@ def main():
             raise RuntimeError("install requirements.txt or pass --tokenizer byte for a smoke test") from exc
         tokenizer = AutoTokenizer.from_pretrained(args.tokenizer, local_files_only=True)
     dataset = JsonlTokenDataset(args.data, tokenizer, args.seq_len)
-    loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, drop_last=False)
+    loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, drop_last=False,
+                        num_workers=args.num_workers, pin_memory=args.device.startswith("cuda"))
     device = torch.device(args.device)
     model = MiniK3ForCausalLM(cfg).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate,
                                   betas=(0.9, 0.95), weight_decay=args.weight_decay)
-    total_updates = math.ceil(len(loader) / args.grad_accum) * args.epochs
+    total_updates = args.max_steps or math.ceil(len(loader) / args.grad_accum) * args.epochs
     use_amp = device.type == "cuda"
     amp = torch.autocast("cuda", dtype=torch.bfloat16) if use_amp else nullcontext()
     update = 0
@@ -117,6 +130,15 @@ def main():
                     print(json.dumps({"epoch": epoch + 1, "update": update,
                                       "loss": float(out["loss"].detach()),
                                       "aux_loss": float(out["aux_loss"].detach()), "lr": lr}))
+                if args.save_every and update % args.save_every == 0:
+                    output = Path(args.output)
+                    output.parent.mkdir(parents=True, exist_ok=True)
+                    torch.save({"model": model.state_dict(), "config": cfg.__dict__,
+                                "optimizer": optimizer.state_dict(), "updates": update}, output)
+                if args.max_steps and update >= args.max_steps:
+                    break
+        if args.max_steps and update >= args.max_steps:
+            break
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     torch.save({"model": model.state_dict(), "config": cfg.__dict__,

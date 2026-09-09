@@ -2,5 +2,6 @@ __pycache__/
 *.pyc
 .DS_Store
 out
+dataset/*.jsonl
 website/
 docs-minimind/
