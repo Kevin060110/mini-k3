@@ -78,6 +78,13 @@ def save_checkpoint(path, model, optimizer, cfg, update, epoch, micro_step, args
         "train_args": vars(args), "save_reason": reason,
     }, tmp)
     tmp.replace(path)
+    status_path = path.with_suffix(path.suffix + ".status.json")
+    status_tmp = status_path.with_suffix(status_path.suffix + ".tmp")
+    status_tmp.write_text(json.dumps({
+        "updates": update, "epoch": epoch + 1, "micro_step": micro_step,
+        "save_reason": reason, "checkpoint": str(path),
+    }, indent=2), encoding="utf-8")
+    status_tmp.replace(status_path)
     print(json.dumps({"event": "checkpoint", "reason": reason, "updates": update,
                       "epoch": epoch + 1, "micro_step": micro_step, "path": str(path)}), flush=True)
 

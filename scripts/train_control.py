@@ -38,11 +38,31 @@ def read_pid(cfg):
         return None
 
 
-def checkpoint_updates(path):
+def read_json_lines(path):
     if not path.exists():
-        return None
-    import torch
-    return int(torch.load(path, map_location="cpu", weights_only=False).get("updates", 0))
+        return []
+    rows = []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            rows.append(json.loads(line))
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return rows
+
+
+def checkpoint_status(path, log_path):
+    """Read tiny metadata only; status must never import torch or load model weights."""
+    sidecar = path.with_suffix(path.suffix + ".status.json")
+    if sidecar.exists():
+        try:
+            return json.loads(sidecar.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            pass
+    for row in reversed(read_json_lines(log_path)):
+        if row.get("event") == "checkpoint":
+            return {"updates": row.get("updates"), "epoch": row.get("epoch"),
+                    "micro_step": row.get("micro_step"), "save_reason": row.get("reason")}
+    return None
 
 
 def command(cfg, resume_path):
@@ -98,14 +118,16 @@ def status(cfg):
     pid = read_pid(cfg)
     alive = bool(pid and process_alive(pid))
     output = ROOT / cfg["output"]
-    updates = checkpoint_updates(output)
-    print(json.dumps({"running": alive, "pid": pid, "checkpoint": str(output.relative_to(ROOT)),
-                      "checkpoint_updates": updates, "target_updates": cfg["max_steps"]}, indent=2))
     log = ROOT / cfg["log"]
-    if log.exists():
-        lines = log.read_text(encoding="utf-8", errors="replace").splitlines()
-        if lines:
-            print("last log:", lines[-1])
+    saved = checkpoint_status(output, log)
+    rows = read_json_lines(log)
+    latest = next((row for row in reversed(rows) if "update" in row), None)
+    print(json.dumps({"running": alive, "pid": pid, "checkpoint": str(output.relative_to(ROOT)),
+                      "checkpoint_updates": saved.get("updates") if saved else None,
+                      "latest_logged_update": latest.get("update") if latest else None,
+                      "target_updates": cfg["max_steps"]}, indent=2))
+    if rows:
+        print("last log:", json.dumps(rows[-1], ensure_ascii=False))
 
 
 def main():

@@ -41,6 +41,7 @@ python scripts/train_control.py resume
 也可用 `python scripts/train_control.py start` 启动。重复执行不会产生两个训练进程。暂停延迟通常是
 完成一个 optimizer step 所需的时间。不要用任务管理器“结束任务”，除非进程失去响应；`Ctrl+C` /
 `SIGTERM` 也会请求保存后退出。状态文件、日志、PID 和 checkpoint 全部位于 `out/`，不会提交 Git。
+`status` 只读取轻量 JSON/日志，不导入 PyTorch，也不会加载约 178MB 的 checkpoint。
 
 ## 快速验证
 
