@@ -3,6 +3,7 @@ import argparse
 import json
 import math
 import random
+import signal
 import sys
 from contextlib import nullcontext
 from pathlib import Path
@@ -65,12 +66,30 @@ def cosine_lr(step, total, peak, warmup):
     return peak * (0.1 + 0.9 * 0.5 * (1 + math.cos(math.pi * progress)))
 
 
+def save_checkpoint(path, model, optimizer, cfg, update, epoch, micro_step, args, reason):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    torch.save({
+        "model": model.state_dict(), "config": cfg.__dict__,
+        "optimizer": optimizer.state_dict(), "updates": update,
+        "epoch": epoch, "micro_step": micro_step,
+        "python_rng_state": random.getstate(), "torch_rng_state": torch.get_rng_state(),
+        "train_args": vars(args), "save_reason": reason,
+    }, tmp)
+    tmp.replace(path)
+    print(json.dumps({"event": "checkpoint", "reason": reason, "updates": update,
+                      "epoch": epoch + 1, "micro_step": micro_step, "path": str(path)}), flush=True)
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--config", default="configs/mini_k3_15m.json")
     p.add_argument("--data", required=True, help="MiniMind pretrain JSONL with a text field")
     p.add_argument("--tokenizer", default="model", help="MiniMind tokenizer path, or 'byte' for smoke tests")
     p.add_argument("--output", default="out/mini_k3_last.pt")
+    p.add_argument("--resume", default="", help="checkpoint to resume model/optimizer/progress from")
+    p.add_argument("--pause-file", default="", help="save and exit safely when this file exists")
     p.add_argument("--seq-len", type=int, default=512)
     p.add_argument("--batch-size", type=int, default=8)
     p.add_argument("--grad-accum", type=int, default=4)
@@ -99,26 +118,58 @@ def main():
             raise RuntimeError("install requirements.txt or pass --tokenizer byte for a smoke test") from exc
         tokenizer = AutoTokenizer.from_pretrained(args.tokenizer, local_files_only=True)
     dataset = JsonlTokenDataset(args.data, tokenizer, args.seq_len)
-    loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, drop_last=False,
-                        num_workers=args.num_workers, pin_memory=args.device.startswith("cuda"))
     device = torch.device(args.device)
     model = MiniK3ForCausalLM(cfg).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate,
                                   betas=(0.9, 0.95), weight_decay=args.weight_decay)
-    total_updates = args.max_steps or math.ceil(len(loader) / args.grad_accum) * args.epochs
+    batches_per_epoch = math.ceil(len(dataset) / args.batch_size)
+    total_updates = args.max_steps or math.ceil(batches_per_epoch / args.grad_accum) * args.epochs
     use_amp = device.type == "cuda"
     amp = torch.autocast("cuda", dtype=torch.bfloat16) if use_amp else nullcontext()
-    update = 0
+    update, start_epoch, start_micro_step = 0, 0, 0
+    if args.resume:
+        checkpoint = torch.load(args.resume, map_location="cpu", weights_only=False)
+        model.load_state_dict(checkpoint["model"])
+        if checkpoint.get("optimizer"):
+            optimizer.load_state_dict(checkpoint["optimizer"])
+        update = int(checkpoint.get("updates", 0))
+        start_epoch = int(checkpoint.get("epoch", 0))
+        start_micro_step = int(checkpoint.get("micro_step", 0))
+        if checkpoint.get("python_rng_state"):
+            random.setstate(checkpoint["python_rng_state"])
+        if checkpoint.get("torch_rng_state") is not None:
+            torch.set_rng_state(checkpoint["torch_rng_state"])
+        print(json.dumps({"event": "resumed", "checkpoint": args.resume, "updates": update,
+                          "epoch": start_epoch + 1, "micro_step": start_micro_step}), flush=True)
+    stop_requested = False
+
+    def request_stop(signum, frame):
+        nonlocal stop_requested
+        stop_requested = True
+        print(json.dumps({"event": "stop_requested", "signal": signum}), flush=True)
+
+    signal.signal(signal.SIGINT, request_stop)
+    if hasattr(signal, "SIGTERM"):
+        signal.signal(signal.SIGTERM, request_stop)
     optimizer.zero_grad(set_to_none=True)
     model.train()
-    for epoch in range(args.epochs):
+    last_epoch, last_micro_step = start_epoch, start_micro_step
+    finished = False
+    for epoch in range(start_epoch, args.epochs):
+        generator = torch.Generator().manual_seed(args.seed + epoch)
+        indices = torch.randperm(len(dataset), generator=generator).tolist()
+        skip_samples = start_micro_step * args.batch_size if epoch == start_epoch else 0
+        epoch_dataset = torch.utils.data.Subset(dataset, indices[skip_samples:])
+        loader = DataLoader(epoch_dataset, batch_size=args.batch_size, shuffle=False, drop_last=False,
+                            num_workers=args.num_workers, pin_memory=args.device.startswith("cuda"))
         for micro_step, (ids, labels, mask) in enumerate(loader, 1):
+            absolute_micro_step = micro_step + (start_micro_step if epoch == start_epoch else 0)
             ids, labels, mask = ids.to(device), labels.to(device), mask.to(device)
             with amp:
                 out = model(ids, attention_mask=mask, labels=labels)
                 loss = out["loss"] / args.grad_accum
             loss.backward()
-            if micro_step % args.grad_accum == 0 or micro_step == len(loader):
+            if absolute_micro_step % args.grad_accum == 0 or micro_step == len(loader):
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
                 lr = cosine_lr(update, total_updates, args.learning_rate, args.warmup_steps)
                 for group in optimizer.param_groups:
@@ -129,21 +180,28 @@ def main():
                 if update % args.log_every == 0 or update == 1:
                     print(json.dumps({"epoch": epoch + 1, "update": update,
                                       "loss": float(out["loss"].detach()),
-                                      "aux_loss": float(out["aux_loss"].detach()), "lr": lr}))
+                                      "aux_loss": float(out["aux_loss"].detach()), "lr": lr}), flush=True)
                 if args.save_every and update % args.save_every == 0:
-                    output = Path(args.output)
-                    output.parent.mkdir(parents=True, exist_ok=True)
-                    torch.save({"model": model.state_dict(), "config": cfg.__dict__,
-                                "optimizer": optimizer.state_dict(), "updates": update}, output)
+                    save_checkpoint(args.output, model, optimizer, cfg, update, epoch,
+                                    absolute_micro_step, args, "interval")
+                last_epoch, last_micro_step = epoch, absolute_micro_step
+                pause_requested = bool(args.pause_file and Path(args.pause_file).exists())
+                if stop_requested or pause_requested:
+                    reason = "pause_file" if pause_requested else "signal"
+                    save_checkpoint(args.output, model, optimizer, cfg, update, epoch,
+                                    absolute_micro_step, args, reason)
+                    print(json.dumps({"event": "paused", "updates": update}), flush=True)
+                    return
                 if args.max_steps and update >= args.max_steps:
+                    finished = True
                     break
-        if args.max_steps and update >= args.max_steps:
+        start_micro_step = 0
+        if finished:
             break
-    output = Path(args.output)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    torch.save({"model": model.state_dict(), "config": cfg.__dict__,
-                "optimizer": optimizer.state_dict(), "updates": update}, output)
-    print(f"saved {output}")
+        last_epoch, last_micro_step = epoch + 1, 0
+    save_checkpoint(args.output, model, optimizer, cfg, update, last_epoch,
+                    last_micro_step, args, "complete")
+    print(json.dumps({"event": "complete", "updates": update}), flush=True)
 
 
 if __name__ == "__main__":

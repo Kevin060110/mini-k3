@@ -1,0 +1,21 @@
+{
+  "config": "configs/mini_k3_15m.json",
+  "data": "dataset/pretrain_t2t_mini.jsonl",
+  "tokenizer": "model",
+  "initial_checkpoint": "out/mini_k3_pretrain_1000.pt",
+  "output": "out/mini_k3_continued.pt",
+  "log": "out/continued_pretrain.log",
+  "error_log": "out/continued_pretrain.err.log",
+  "pid_file": "out/continued_pretrain.pid",
+  "pause_file": "out/PAUSE_CONTINUED_TRAINING",
+  "seq_len": 128,
+  "batch_size": 2,
+  "grad_accum": 2,
+  "epochs": 2,
+  "learning_rate": 0.0001,
+  "warmup_steps": 0,
+  "max_steps": 10000,
+  "save_every": 100,
+  "log_every": 5,
+  "device": "cuda"
+}

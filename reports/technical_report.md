@@ -124,6 +124,21 @@ auxiliary-loss-free 在线负载校正；本参考训练器默认仍采用可微
 公平比较必须让 baseline 与 mini-k3 使用相同 tokenizer、训练 tokens、batch tokens、数据顺序和优化器。
 除最终 loss/PPL 外，应报告峰值显存、训练 tokens/s 和固定 prompt 的生成 tokens/s。
 
+### 3.4 后续训练与暂停恢复设计
+
+下一阶段配置 `configs/continued_pretrain.json` 将累计目标设为 10,000 optimizer steps（约 5.12M token
+positions），从 1,000-step checkpoint 延续。峰值学习率降低到 1e-4，保持 batch=2、梯度累积=2、
+sequence=128，并每 100 steps 保存。
+
+训练 checkpoint 新增 `epoch`、`micro_step`、Python/PyTorch RNG state、完整训练参数和 `save_reason`。
+保存先写入同目录 `.tmp` 文件，再使用原子替换，避免中断时留下半写入权重。每个 optimizer step 后检查
+pause marker；发现后保存全部状态并正常退出。恢复时重建同一 epoch 的确定性样本排列，跳过已经消费的
+样本，从下一个 micro-batch 继续。旧版 1,000-step checkpoint 没有数据位置字段，因此第一次延续从新
+排列开头开始；后续所有暂停均能记录精确位置。
+
+控制器 `scripts/train_control.py` 提供 `start`、`pause`、`resume` 和 `status`，并通过 PID 文件防止重复
+启动。暂停和 checkpoint 文件都在 Git 忽略的 `out/` 目录。
+
 ## 4. 实验与结果
 
 ### 4.1 正确性测试（实测）

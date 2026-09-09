@@ -22,6 +22,26 @@ token positions。训练 loss 的前 20 个日志点均值由 `8.322` 降至最�
 本地 checkpoint：`out/mini_k3_pretrain_1000.pt`（约 178MB，已由 `.gitignore` 排除）。可复现
 评估结果见 [`reports/pretrain_eval.json`](reports/pretrain_eval.json)。
 
+## 可暂停的后续训练
+
+后续阶段目标为累计 10,000 optimizer steps，配置位于
+[`configs/continued_pretrain.json`](configs/continued_pretrain.json)。控制命令：
+
+```bash
+# 查看状态
+python scripts/train_control.py status
+
+# 安全暂停：当前 optimizer step 完成后原子保存再退出
+python scripts/train_control.py pause
+
+# 从最新 out/mini_k3_continued.pt 恢复；首次运行则从 1000-step checkpoint 开始
+python scripts/train_control.py resume
+```
+
+也可用 `python scripts/train_control.py start` 启动。重复执行不会产生两个训练进程。暂停延迟通常是
+完成一个 optimizer step 所需的时间。不要用任务管理器“结束任务”，除非进程失去响应；`Ctrl+C` /
+`SIGTERM` 也会请求保存后退出。状态文件、日志、PID 和 checkpoint 全部位于 `out/`，不会提交 Git。
+
 ## 快速验证
 
 ```bash
@@ -51,7 +71,9 @@ python trainer/train_minik3.py \
 ```text
 model/model_minik3.py          Mini-K3 模型
 trainer/train_minik3.py        预训练入口
+scripts/train_control.py       启动/暂停/恢复/状态控制
 configs/mini_k3_15m.json       默认配置
+configs/continued_pretrain.json 后续训练计划
 benchmarks/benchmark_model.py  消融性能基准
 tests/test_model.py            正确性测试
 reports/technical_report.md    技术报告
