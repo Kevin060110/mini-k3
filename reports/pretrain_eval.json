@@ -1,0 +1,16 @@
+{
+  "checkpoint_updates": 1000,
+  "probe_samples": 16,
+  "sequence_length": 128,
+  "random_initialization": {
+    "cross_entropy": 8.812137393500862,
+    "perplexity": 6715.257085630936,
+    "tokens": 2032
+  },
+  "trained_checkpoint": {
+    "cross_entropy": 6.919506042961061,
+    "perplexity": 1011.8200754274017,
+    "tokens": 2032
+  },
+  "note": "Fixed tail probe; not a strict held-out split because training sampled the full file."
+}

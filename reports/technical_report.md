@@ -8,8 +8,9 @@ Delta Attention（KDA）、Attention Residuals（AttnRes）和 Stable LatentMoE�
 14,785,408，每 token 估算激活参数 7,707,520（52.13%）。
 
 需要强调：本报告的“实现”是论文思想的缩放适配，不是 K3 的 2.8T 官方架构逐位复刻。当前已完成
-单元测试、端到端训练冒烟和 CPU 消融性能测试；尚未进行大语料预训练，因此不能声称语言能力已经
-超过训练完毕的 MiniMind。本文严格区分实测结果与预期收益。
+单元测试、端到端训练冒烟、CPU 消融性能测试，以及在 MiniMind 官方 1.24GB 数据上的第一阶段
+1,000-step 预训练。该短训练覆盖的数据比例仍很低，不能声称语言能力已经超过训练完毕的 MiniMind。
+本文严格区分实测结果与预期收益。
 
 ## 1. 背景与设计依据
 
@@ -87,7 +88,26 @@ auxiliary-loss-free 在线负载校正；本参考训练器默认仍采用可微
 | vocabulary | 6400 |
 | total / active params | 14.79M / 7.71M |
 
-### 3.2 建议正式预训练方案（尚未执行）
+### 3.2 已执行的第一阶段预训练
+
+| 项目 | 实际设置 |
+|---|---|
+| GPU | NVIDIA RTX 4070 Laptop 8GB |
+| 数据 | `pretrain_t2t_mini.jsonl`，1,270,238 条，1.24GB |
+| optimizer steps | 1,000 |
+| batch / gradient accumulation | 2 / 2 |
+| sequence length | 128 |
+| token positions | 512,000 |
+| optimizer | AdamW, betas=(0.9, 0.95), weight decay=0.1 |
+| LR | peak 3e-4，100-step warmup，cosine decay |
+| precision | BF16 autocast |
+| checkpoint interval | 100 steps |
+| wall time | 约 46 分 29 秒（含首次数据索引和保存） |
+
+训练数据采用文件偏移流式索引，而不是一次性载入 1.24GB 文本。最终 checkpoint 的
+`updates` 字段已校验为 1000，文件约 178MB，保存在本地 `out/`，不提交 GitHub。
+
+### 3.3 建议完整预训练方案（尚未执行）
 
 | 项目 | 建议值 |
 |---|---|
@@ -129,7 +149,31 @@ tiny 2 层模型、4 条 byte-tokenized 样本、batch=2、2 个 optimizer updat
 checkpoint 成功写入 `out/smoke_test.pt`。该实验只证明数据加载、反向、优化和保存链路可用；样本太少，
 不能解释为语言质量提升。
 
-### 4.3 架构消融性能（实测）
+### 4.3 第一阶段预训练结果（实测）
+
+训练日志共记录 201 个采样点（step 1，之后每 5 steps）：
+
+| 指标 | 结果 |
+|---|---:|
+| step 1 loss | 8.8946 |
+| 前 20 个日志点平均 loss | 8.3225 |
+| 最后 20 个日志点平均 loss | 6.5616 |
+| 最低单批 loss | 5.7140 |
+| step 1000 loss | 6.4493 |
+| 平均 loss 降幅（首尾窗口） | 21.16% |
+
+另在数据文件尾部固定 16 条样本、2,032 个非 padding target tokens 上做 probe：
+
+| 模型 | cross-entropy | perplexity |
+|---|---:|---:|
+| 同架构随机初始化 | 8.8121 | 6715.3 |
+| 1,000-step checkpoint | 6.9195 | 1011.8 |
+
+perplexity 相对随机初始化下降约 84.9%，说明训练确实学到了 token 分布。需要注意，初次训练对完整文件
+进行了随机采样，没有事先排除这 16 条数据；虽然 4,000 个已见样本只占 127 万条数据约 0.315%，该
+probe 仍不能称为严格无污染验证集。原始结果保存于 `reports/pretrain_eval.json`。
+
+### 4.4 架构消融性能（实测）
 
 CPU，batch=1，sequence=64，1 次 warmup + 3 次计时；统一 hidden=256、6 层。完整原始 JSON 位于
 `reports/benchmark_results.json`。
@@ -145,10 +189,10 @@ CPU，batch=1，sequence=64，1 次 warmup + 3 次计时；统一 hidden=256、6
 激活计算解耦。当前 mini-k3 **没有在 CPU 墙钟时间上更快**：逐 token KDA 参考循环使其慢约 7.8 倍。
 因此“更快”目前只成立于长序列状态复杂度和具备 fused kernel 后的设计潜力，不能从本次结果宣称已实现。
 
-### 4.4 尚缺的质量评测
+### 4.5 尚缺的质量评测
 
-没有下载大语料或消耗数小时/数天 GPU 预算，故没有可信的 validation perplexity、C-Eval、CMMLU、
-GSM8K 或 HumanEval 分数。完成正式训练后，建议至少比较：
+第一阶段只训练 512K token positions，远低于建议的 0.5B–5B token budget，故仍没有可信的严格
+validation perplexity、C-Eval、CMMLU、GSM8K 或 HumanEval 分数。继续完整训练后，建议至少比较：
 
 1. validation PPL 与达到同一 PPL 所需 tokens/FLOPs；
 2. C-Eval/CMMLU（中文知识）、GSM8K（推理）、HumanEval（代码）；
@@ -180,6 +224,11 @@ python trainer/train_minik3.py --config tests/tiny_config.json \
   --data tests/tiny_data.jsonl --tokenizer byte --seq-len 32 \
   --batch-size 2 --grad-accum 1 --epochs 1 --device cpu \
   --output out/smoke_test.pt
+
+# 第一阶段 checkpoint probe
+python benchmarks/evaluate_checkpoint.py \
+  --checkpoint out/mini_k3_pretrain_1000.pt \
+  --data dataset/pretrain_t2t_mini.jsonl --samples 16 --device cuda
 ```
 
 ## 7. 文件清单
@@ -189,5 +238,7 @@ python trainer/train_minik3.py --config tests/tiny_config.json \
 - `configs/mini_k3_15m.json`：默认实验配置。
 - `tests/test_model.py`：正确性测试。
 - `benchmarks/benchmark_model.py`：参数/吞吐消融。
+- `benchmarks/evaluate_checkpoint.py`：checkpoint loss/perplexity probe。
 - `reports/benchmark_results.json`：本机原始测量。
+- `reports/pretrain_eval.json`：第一阶段预训练 probe 结果。
 - `reports/k3_tech_report.pdf`：论文归档。

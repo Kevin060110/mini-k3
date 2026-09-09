@@ -12,6 +12,16 @@
 默认配置共有 **14.79M** 参数、每 token 激活约 **7.71M** 参数。实现是研究型缩放版本，
 不是 Moonshot 2.8T 模型的逐位复现，也不包含其闭源训练数据和集群内核。
 
+## 训练状态
+
+已在 RTX 4070 Laptop 8GB 上完成第一阶段 **1,000 optimizer steps** 预训练，处理 512,000 个
+token positions。训练 loss 的前 20 个日志点均值由 `8.322` 降至最后 20 个日志点的 `6.562`。
+固定 probe 的 perplexity 从随机初始化的 `6715.3` 降至 `1011.8`。由于该 probe 未在训练前严格
+隔离，结果只用于确认学习有效，不能作为与已完整训练 MiniMind 的公平质量对比。
+
+本地 checkpoint：`out/mini_k3_pretrain_1000.pt`（约 178MB，已由 `.gitignore` 排除）。可复现
+评估结果见 [`reports/pretrain_eval.json`](reports/pretrain_eval.json)。
+
 ## 快速验证
 
 ```bash
@@ -29,7 +39,7 @@ python trainer/train_minik3.py --config tests/tiny_config.json \
 pip install -r requirements.txt
 python trainer/train_minik3.py \
   --config configs/mini_k3_15m.json \
-  --data dataset/pretrain_hq.jsonl --tokenizer model \
+  --data dataset/pretrain_t2t_mini.jsonl --tokenizer model \
   --seq-len 512 --batch-size 8 --grad-accum 4 --epochs 1
 ```
 

@@ -1,0 +1,32 @@
+{
+  "status": "completed",
+  "completed_at": "2026-09-09T21:55:41+08:00",
+  "hardware": "NVIDIA GeForce RTX 4070 Laptop GPU 8GB",
+  "dataset": {
+    "name": "jingyaogong/minimind_dataset:pretrain_t2t_mini.jsonl",
+    "records": 1270238,
+    "bytes": 1241043656
+  },
+  "training": {
+    "optimizer_steps": 1000,
+    "batch_size": 2,
+    "gradient_accumulation": 2,
+    "sequence_length": 128,
+    "token_positions": 512000,
+    "warmup_steps": 100,
+    "peak_learning_rate": 0.0003,
+    "wall_time_seconds": 2789
+  },
+  "loss": {
+    "step_1": 8.894603729248047,
+    "step_1000": 6.449276924133301,
+    "first_20_logged_mean": 8.322451829910278,
+    "last_20_logged_mean": 6.561642217636108,
+    "minimum_logged": 5.714046478271484
+  },
+  "checkpoint": {
+    "local_path": "out/mini_k3_pretrain_1000.pt",
+    "bytes": 177760212,
+    "tracked_by_git": false
+  }
+}
