@@ -1,0 +1,39 @@
+{
+  "status": "completed",
+  "completed_at": "2026-09-10T04:58:55+08:00",
+  "hardware": "NVIDIA GeForce RTX 4070 Laptop GPU 8GB",
+  "checkpoint_updates": 10000,
+  "continued_from_updates": 1000,
+  "training": {
+    "continued_optimizer_steps": 9000,
+    "batch_size": 2,
+    "gradient_accumulation": 2,
+    "sequence_length": 128,
+    "cumulative_token_positions": 5120000,
+    "continued_token_positions": 4608000,
+    "peak_learning_rate": 0.0001,
+    "final_learning_rate": 0.000010000002220660971,
+    "checkpoint_interval": 100,
+    "approximate_main_run_wall_time_seconds": 23411
+  },
+  "loss": {
+    "step_1005": 6.048041343688965,
+    "step_10000": 5.41077995300293,
+    "first_20_logged_mean": 6.54204409122467,
+    "last_20_logged_mean": 5.379716920852661,
+    "minimum_logged": 4.075256824493408
+  },
+  "probe": {
+    "samples": 16,
+    "tokens": 2032,
+    "step_1000_perplexity": 1011.8200754274017,
+    "step_10000_cross_entropy": 6.1233279611182025,
+    "step_10000_perplexity": 456.3809882006495,
+    "strictly_held_out": false
+  },
+  "checkpoint": {
+    "local_path": "out/mini_k3_continued.pt",
+    "bytes": 177769154,
+    "tracked_by_git": false
+  }
+}

@@ -9,7 +9,7 @@ Delta Attention（KDA）、Attention Residuals（AttnRes）和 Stable LatentMoE�
 
 需要强调：本报告的“实现”是论文思想的缩放适配，不是 K3 的 2.8T 官方架构逐位复刻。当前已完成
 单元测试、端到端训练冒烟、CPU 消融性能测试，以及在 MiniMind 官方 1.24GB 数据上的第一阶段
-1,000-step 预训练。该短训练覆盖的数据比例仍很低，不能声称语言能力已经超过训练完毕的 MiniMind。
+累计 10,000-step 预训练。该训练预算仍明显小于完整 MiniMind，不能声称语言能力已经超过训练完毕的 MiniMind。
 本文严格区分实测结果与预期收益。
 
 ## 1. 背景与设计依据
@@ -124,11 +124,11 @@ auxiliary-loss-free 在线负载校正；本参考训练器默认仍采用可微
 公平比较必须让 baseline 与 mini-k3 使用相同 tokenizer、训练 tokens、batch tokens、数据顺序和优化器。
 除最终 loss/PPL 外，应报告峰值显存、训练 tokens/s 和固定 prompt 的生成 tokens/s。
 
-### 3.4 后续训练与暂停恢复设计
+### 3.4 后续训练与暂停恢复（已完成）
 
-下一阶段配置 `configs/continued_pretrain.json` 将累计目标设为 10,000 optimizer steps（约 5.12M token
-positions），从 1,000-step checkpoint 延续。峰值学习率降低到 1e-4，保持 batch=2、梯度累积=2、
-sequence=128，并每 100 steps 保存。
+配置 `configs/continued_pretrain.json` 将累计目标设为 10,000 optimizer steps（5.12M token
+positions），从 1,000-step checkpoint 延续并已完成。续训峰值学习率为 1e-4，保持 batch=2、
+梯度累积=2、sequence=128，并每 100 steps 保存。续训主体耗时约 6 小时 30 分。
 
 训练 checkpoint 新增 `epoch`、`micro_step`、Python/PyTorch RNG state、完整训练参数和 `save_reason`。
 保存先写入同目录 `.tmp` 文件，再使用原子替换，避免中断时留下半写入权重。每个 optimizer step 后检查
@@ -188,7 +188,34 @@ perplexity 相对随机初始化下降约 84.9%，说明训练确实学到了 to
 进行了随机采样，没有事先排除这 16 条数据；虽然 4,000 个已见样本只占 127 万条数据约 0.315%，该
 probe 仍不能称为严格无污染验证集。原始结果保存于 `reports/pretrain_eval.json`。
 
-### 4.4 架构消融性能（实测）
+### 4.4 10,000-step 续训结果（实测）
+
+续训日志记录 1,800 个 loss 采样点，最终以 `event=complete, updates=10000` 正常退出，错误日志为空。
+
+| 指标 | 结果 |
+|---|---:|
+| 累计 optimizer steps | 10,000 |
+| 累计 token positions | 5,120,000 |
+| step 1005 起始 loss | 6.0480 |
+| 续训前 20 日志点平均 loss | 6.5420 |
+| 续训后 20 日志点平均 loss | 5.3797 |
+| 续训最低单批 loss | 4.0753 |
+| step 10000 loss | 5.4108 |
+| 首尾窗口平均 loss 降幅 | 17.77% |
+
+相同固定 16 条、2,032 target-token probe 的阶段对比：
+
+| 模型阶段 | cross-entropy | perplexity |
+|---|---:|---:|
+| 随机初始化 | 8.8121 | 6715.3 |
+| step 1000 | 6.9195 | 1011.8 |
+| step 10000 | 6.1233 | 456.4 |
+
+step 10000 相对 step 1000 的 probe perplexity 再下降约 54.9%，相对随机初始化下降约 93.2%。同样，
+该 probe 并非严格预留验证集，不能替代公平的 MiniMind 基线和下游任务评测。机器可读结果位于
+`reports/continued_pretrain_eval.json` 和 `reports/continued_pretrain_summary.json`。
+
+### 4.5 架构消融性能（实测）
 
 CPU，batch=1，sequence=64，1 次 warmup + 3 次计时；统一 hidden=256、6 层。完整原始 JSON 位于
 `reports/benchmark_results.json`。
@@ -204,9 +231,9 @@ CPU，batch=1，sequence=64，1 次 warmup + 3 次计时；统一 hidden=256、6
 激活计算解耦。当前 mini-k3 **没有在 CPU 墙钟时间上更快**：逐 token KDA 参考循环使其慢约 7.8 倍。
 因此“更快”目前只成立于长序列状态复杂度和具备 fused kernel 后的设计潜力，不能从本次结果宣称已实现。
 
-### 4.5 尚缺的质量评测
+### 4.6 尚缺的质量评测
 
-第一阶段只训练 512K token positions，远低于建议的 0.5B–5B token budget，故仍没有可信的严格
+当前累计训练 5.12M token positions，仍远低于建议的 0.5B–5B token budget，故没有可信的严格
 validation perplexity、C-Eval、CMMLU、GSM8K 或 HumanEval 分数。继续完整训练后，建议至少比较：
 
 1. validation PPL 与达到同一 PPL 所需 tokens/FLOPs；
@@ -256,4 +283,6 @@ python benchmarks/evaluate_checkpoint.py \
 - `benchmarks/evaluate_checkpoint.py`：checkpoint loss/perplexity probe。
 - `reports/benchmark_results.json`：本机原始测量。
 - `reports/pretrain_eval.json`：第一阶段预训练 probe 结果。
+- `reports/continued_pretrain_eval.json`：10,000-step checkpoint probe 结果。
+- `reports/continued_pretrain_summary.json`：续训设置和曲线摘要。
 - `reports/k3_tech_report.pdf`：论文归档。

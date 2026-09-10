@@ -2,6 +2,7 @@
 import argparse
 import json
 import math
+import os
 import random
 import signal
 import sys
@@ -97,6 +98,7 @@ def main():
     p.add_argument("--output", default="out/mini_k3_last.pt")
     p.add_argument("--resume", default="", help="checkpoint to resume model/optimizer/progress from")
     p.add_argument("--pause-file", default="", help="save and exit safely when this file exists")
+    p.add_argument("--pid-file", default="", help="controller PID file to remove on clean exit")
     p.add_argument("--seq-len", type=int, default=512)
     p.add_argument("--batch-size", type=int, default=8)
     p.add_argument("--grad-accum", type=int, default=4)
@@ -198,6 +200,10 @@ def main():
                     save_checkpoint(args.output, model, optimizer, cfg, update, epoch,
                                     absolute_micro_step, args, reason)
                     print(json.dumps({"event": "paused", "updates": update}), flush=True)
+                    if args.pid_file:
+                        pid_path = Path(args.pid_file)
+                        if pid_path.exists() and pid_path.read_text().strip() == str(os.getpid()):
+                            pid_path.unlink()
                     return
                 if args.max_steps and update >= args.max_steps:
                     finished = True
@@ -209,6 +215,10 @@ def main():
     save_checkpoint(args.output, model, optimizer, cfg, update, last_epoch,
                     last_micro_step, args, "complete")
     print(json.dumps({"event": "complete", "updates": update}), flush=True)
+    if args.pid_file:
+        pid_path = Path(args.pid_file)
+        if pid_path.exists() and pid_path.read_text().strip() == str(os.getpid()):
+            pid_path.unlink()
 
 
 if __name__ == "__main__":

@@ -14,17 +14,18 @@
 
 ## 训练状态
 
-已在 RTX 4070 Laptop 8GB 上完成第一阶段 **1,000 optimizer steps** 预训练，处理 512,000 个
-token positions。训练 loss 的前 20 个日志点均值由 `8.322` 降至最后 20 个日志点的 `6.562`。
-固定 probe 的 perplexity 从随机初始化的 `6715.3` 降至 `1011.8`。由于该 probe 未在训练前严格
-隔离，结果只用于确认学习有效，不能作为与已完整训练 MiniMind 的公平质量对比。
+已在 RTX 4070 Laptop 8GB 上完成累计 **10,000 optimizer steps** 预训练，处理 5,120,000 个
+token positions。续训阶段 loss 的前 20 个日志点均值由 `6.542` 降至最后 20 个日志点的 `5.380`；
+固定 probe 的 perplexity 从随机初始化的 `6715.3`、step 1000 的 `1011.8` 进一步降至 step 10000
+的 `456.4`。由于该 probe 未在训练前严格隔离，结果只用于确认学习有效，不能作为与已完整训练
+MiniMind 的公平质量对比。
 
-本地 checkpoint：`out/mini_k3_pretrain_1000.pt`（约 178MB，已由 `.gitignore` 排除）。可复现
-评估结果见 [`reports/pretrain_eval.json`](reports/pretrain_eval.json)。
+最终本地 checkpoint：`out/mini_k3_continued.pt`（约 178MB，已由 `.gitignore` 排除）。可复现
+评估结果见 [`reports/continued_pretrain_eval.json`](reports/continued_pretrain_eval.json)。
 
 ## 可暂停的后续训练
 
-后续阶段目标为累计 10,000 optimizer steps，配置位于
+后续阶段已达到累计 10,000 optimizer steps，配置位于
 [`configs/continued_pretrain.json`](configs/continued_pretrain.json)。控制命令：
 
 ```bash
@@ -34,7 +35,7 @@ python scripts/train_control.py status
 # 安全暂停：当前 optimizer step 完成后原子保存再退出
 python scripts/train_control.py pause
 
-# 从最新 out/mini_k3_continued.pt 恢复；首次运行则从 1000-step checkpoint 开始
+# 从最新 out/mini_k3_continued.pt 恢复（达到目标后会提示已完成而不重复启动）
 python scripts/train_control.py resume
 ```
 

@@ -71,6 +71,7 @@ def command(cfg, resume_path):
         "--config", cfg["config"], "--data", cfg["data"],
         "--tokenizer", cfg["tokenizer"], "--output", cfg["output"],
         "--resume", str(resume_path), "--pause-file", cfg["pause_file"],
+        "--pid-file", cfg["pid_file"],
         "--seq-len", str(cfg["seq_len"]), "--batch-size", str(cfg["batch_size"]),
         "--grad-accum", str(cfg["grad_accum"]), "--epochs", str(cfg["epochs"]),
         "--learning-rate", str(cfg["learning_rate"]), "--warmup-steps", str(cfg["warmup_steps"]),
@@ -88,6 +89,10 @@ def start(cfg):
     pause.unlink(missing_ok=True)
     output = ROOT / cfg["output"]
     initial = ROOT / cfg["initial_checkpoint"]
+    saved = checkpoint_status(output, ROOT / cfg["log"])
+    if saved and int(saved.get("updates") or 0) >= int(cfg["max_steps"]):
+        print(f"training already complete at update {saved['updates']}")
+        return
     resume_path = output if output.exists() else initial
     if not resume_path.exists():
         raise FileNotFoundError(f"resume checkpoint not found: {resume_path}")
@@ -122,6 +127,13 @@ def status(cfg):
     saved = checkpoint_status(output, log)
     rows = read_json_lines(log)
     latest = next((row for row in reversed(rows) if "update" in row), None)
+    completed = any(row.get("event") == "complete" and
+                    int(row.get("updates", 0)) >= int(cfg["max_steps"]) for row in reversed(rows))
+    if completed:
+        alive = False
+    if not alive and pid and (ROOT / cfg["pid_file"]).exists():
+        (ROOT / cfg["pid_file"]).unlink()
+        pid = None
     print(json.dumps({"running": alive, "pid": pid, "checkpoint": str(output.relative_to(ROOT)),
                       "checkpoint_updates": saved.get("updates") if saved else None,
                       "latest_logged_update": latest.get("update") if latest else None,
