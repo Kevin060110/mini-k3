@@ -3,6 +3,9 @@
 一个基于 [MiniMind](https://github.com/jingyaogong/minimind)、受
 [Kimi K3](https://arxiv.org/abs/2607.24653) 启发的可训练 mini LLM 实验项目。
 
+课程提交可先阅读 [项目提交说明](SUBMISSION.md)，完整实验分析见
+[技术报告](reports/technical_report.md)。
+
 本项目将 K3 的三个架构思想缩放到单卡/教学场景：
 
 - `KimiDeltaAttention`：3:1 的线性 delta attention / 全注意力混合；
@@ -79,6 +82,7 @@ configs/continued_pretrain.json 后续训练计划
 benchmarks/benchmark_model.py  消融性能基准
 tests/test_model.py            正确性测试
 reports/technical_report.md    技术报告
+SUBMISSION.md                   课程提交说明与教师沟通模板
 ```
 
 MiniMind 原项目采用 Apache-2.0 许可证；本仓库保留其 `LICENSE` 和来源说明。
